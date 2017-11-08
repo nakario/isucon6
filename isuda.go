@@ -485,7 +485,7 @@ func isSpamContents(content string, txn newrelic.Transaction) bool {
 	panicIf(err)
 	req.PostForm = v
 	s := newrelic.StartExternalSegment(txn, req)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.PostForm(isupamEndpoint, v)
 	s.End()
 	panicIf(err)
 	defer resp.Body.Close()
