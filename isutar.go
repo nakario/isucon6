@@ -20,6 +20,7 @@ var (
 	baseUrl *url.URL
 	db      *sql.DB
 	re      *render.Render
+	app		newrelic.Application
 )
 
 func initializeHandler(w http.ResponseWriter, r *http.Request) {
@@ -121,7 +122,7 @@ func main() {
 	db.Exec("SET NAMES utf8mb4")
 
 	cfg := newrelic.NewConfig("isutar", os.Getenv("NEW_RELIC_KEY"))
-	app, err := newrelic.NewApplication(cfg)
+	app, err = newrelic.NewApplication(cfg)
 	if err != nil {
 		log.Fatalf("Failed to connect to New Relic: %s.", err.Error())
 	}
@@ -130,10 +131,10 @@ func main() {
 
 	r := mux.NewRouter()
 	AttachProfiler(r)
-	r.HandleFunc("/initialize", myHandler(app, "initializeHandler", initializeHandler))
+	r.HandleFunc("/initialize", myHandler(initializeHandler))
 	s := r.PathPrefix("/stars").Subrouter()
-	s.Methods("GET").HandlerFunc(myHandler(app, "starsHandler", starsHandler))
-	s.Methods("POST").HandlerFunc(myHandler(app, "starsPostHandler", starsPostHandler))
+	s.Methods("GET").HandlerFunc(myHandler(starsHandler))
+	s.Methods("POST").HandlerFunc(myHandler(starsPostHandler))
 
 	log.Fatal(http.ListenAndServe(":5001", r))
 }

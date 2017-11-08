@@ -43,44 +43,64 @@ var (
 	db      *sql.DB
 	re      *render.Render
 	store   *sessions.CookieStore
+	app		newrelic.Application
 
 	errInvalidUser = errors.New("Invalid User")
 	htmlCache = make(map[string]string)
 	keywords = syncmap.Map{}
 )
 
-func setName(w http.ResponseWriter, r *http.Request) error {
-	session := getSession(w, r)
+func setName(w http.ResponseWriter, r *http.Request, txn newrelic.Transaction) error {
+	session := getSession(w, r, txn)
 	userID, ok := session.Values["user_id"]
 	if !ok {
 		return nil
 	}
-	setContext(r, "user_id", userID)
+	setContext(r, "user_id", userID, txn)
+	s := newrelic.DatastoreSegment{
+		StartTime: txn.StartSegmentNow(),
+		Product: newrelic.DatastoreMySQL,
+		Collection: "user",
+		Operation: "GET",
+	}
 	row := db.QueryRow(`SELECT name FROM user WHERE id = ?`, userID)
 	user := User{}
 	err := row.Scan(&user.Name)
+	s.End()
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return errInvalidUser
 		}
 		panicIf(err)
 	}
-	setContext(r, "user_name", user.Name)
+	setContext(r, "user_name", user.Name, txn)
 	return nil
 }
 
-func authenticate(w http.ResponseWriter, r *http.Request) error {
-	if u := getContext(r, "user_id"); u != nil {
+func authenticate(w http.ResponseWriter, r *http.Request, txn newrelic.Transaction) error {
+	if u := getContext(r, "user_id", txn); u != nil {
 		return nil
 	}
 	return errInvalidUser
 }
 
 func initializeHandler(w http.ResponseWriter, r *http.Request) {
+	txn := app.StartTransaction("initializeHandler", w, r)
+	defer txn.End()
+	s := newrelic.DatastoreSegment{
+		StartTime: txn.StartSegmentNow(),
+		Product: newrelic.DatastoreMySQL,
+		Collection: "entry",
+		Operation: "DELETE",
+	}
 	_, err := db.Exec(`DELETE FROM entry WHERE id > 7101`)
+	s.End()
 	panicIf(err)
 
-	resp, err := http.Get(fmt.Sprintf("%s/initialize", isutarEndpoint))
+	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/initialize", isutarEndpoint), nil)
+	s2 := newrelic.StartExternalSegment(txn, req)
+	resp, err := http.DefaultClient.Do(req)
+	s2.End()
 	panicIf(err)
 	defer resp.Body.Close()
 
@@ -88,7 +108,9 @@ func initializeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func topHandler(w http.ResponseWriter, r *http.Request) {
-	if err := setName(w, r); err != nil {
+	txn := app.StartTransaction("topHandler", w, r)
+	defer txn.End()
+	if err := setName(w, r, txn); err != nil {
 		forbidden(w)
 		return
 	}
@@ -100,11 +122,18 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	page, _ := strconv.Atoi(p)
 
+	s := newrelic.DatastoreSegment{
+		StartTime: txn.StartSegmentNow(),
+		Product: newrelic.DatastoreMySQL,
+		Collection: "entry",
+		Operation: "SELECT",
+	}
 	rows, err := db.Query(fmt.Sprintf(
 		"SELECT * FROM entry ORDER BY id DESC LIMIT %d OFFSET %d",
 		perPage, perPage*(page-1),
 	))
 	if err != nil && err != sql.ErrNoRows {
+		s.End()
 		panicIf(err)
 	}
 	entries := make([]*Entry, 0, 10)
@@ -112,15 +141,23 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 		e := Entry{}
 		err := rows.Scan(&e.ID, &e.AuthorID, &e.Keyword, &e.Description, &e.UpdatedAt, &e.CreatedAt)
 		panicIf(err)
-		e.Html = htmlify(w, r, e.Description)
-		e.Stars = loadStars(e.Keyword)
+		e.Html = htmlify(w, r, e.Description, txn)
+		e.Stars = loadStars(e.Keyword, txn)
 		entries = append(entries, &e)
 	}
 	rows.Close()
+	s.End()
 
 	var totalEntries int
+	s2 := newrelic.DatastoreSegment{
+		StartTime: txn.StartSegmentNow(),
+		Product: newrelic.DatastoreMySQL,
+		Collection: "entry",
+		Operation: "SELECT",
+	}
 	row := db.QueryRow(`SELECT COUNT(*) FROM entry`)
 	err = row.Scan(&totalEntries)
+	s2.End()
 	if err != nil && err != sql.ErrNoRows {
 		panicIf(err)
 	}
@@ -145,15 +182,19 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func robotsHandler(w http.ResponseWriter, r *http.Request) {
+	txn := app.StartTransaction("robotsHandler", w, r)
+	defer txn.End()
 	notFound(w)
 }
 
 func keywordPostHandler(w http.ResponseWriter, r *http.Request) {
-	if err := setName(w, r); err != nil {
+	txn := app.StartTransaction("keywordPostHandler", w, r)
+	defer txn.End()
+	if err := setName(w, r, txn); err != nil {
 		forbidden(w)
 		return
 	}
-	if err := authenticate(w, r); err != nil {
+	if err := authenticate(w, r, txn); err != nil {
 		forbidden(w)
 		return
 	}
@@ -163,12 +204,18 @@ func keywordPostHandler(w http.ResponseWriter, r *http.Request) {
 		badRequest(w)
 		return
 	}
-	userID := getContext(r, "user_id").(int)
+	userID := getContext(r, "user_id", txn).(int)
 	description := r.FormValue("description")
 
-	if isSpamContents(description) || isSpamContents(keyword) {
+	if isSpamContents(description, txn) || isSpamContents(keyword, txn) {
 		http.Error(w, "SPAM!", http.StatusBadRequest)
 		return
+	}
+	s := newrelic.DatastoreSegment{
+		StartTime: txn.StartSegmentNow(),
+		Product: newrelic.DatastoreMySQL,
+		Collection: "entry",
+		Operation: "INSERT",
 	}
 	_, err := db.Exec(`
 		INSERT INTO entry (author_id, keyword, description, created_at, updated_at)
@@ -176,13 +223,16 @@ func keywordPostHandler(w http.ResponseWriter, r *http.Request) {
 		ON DUPLICATE KEY UPDATE
 		author_id = ?, keyword = ?, description = ?, updated_at = NOW()
 	`, userID, keyword, description, userID, keyword, description)
+	s.End()
 	panicIf(err)
 	time.Sleep(sleepTime)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
-	if err := setName(w, r); err != nil {
+	txn := app.StartTransaction("loginHandler", w, r)
+	defer txn.End()
+	if err := setName(w, r, txn); err != nil {
 		forbidden(w)
 		return
 	}
@@ -196,30 +246,43 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func loginPostHandler(w http.ResponseWriter, r *http.Request) {
+	txn := app.StartTransaction("loginPostHandler", w, r)
+	defer txn.End()
 	name := r.FormValue("name")
+	s := newrelic.DatastoreSegment{
+		StartTime: txn.StartSegmentNow(),
+		Product: newrelic.DatastoreMySQL,
+		Collection: "user",
+		Operation: "SELECT",
+	}
 	row := db.QueryRow(`SELECT * FROM user WHERE name = ?`, name)
 	user := User{}
 	err := row.Scan(&user.ID, &user.Name, &user.Salt, &user.Password, &user.CreatedAt)
+	s.End()
 	if err == sql.ErrNoRows || user.Password != fmt.Sprintf("%x", sha1.Sum([]byte(user.Salt+r.FormValue("password")))) {
 		forbidden(w)
 		return
 	}
 	panicIf(err)
-	session := getSession(w, r)
+	session := getSession(w, r, txn)
 	session.Values["user_id"] = user.ID
 	session.Save(r, w)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
 func logoutHandler(w http.ResponseWriter, r *http.Request) {
-	session := getSession(w, r)
+	txn := app.StartTransaction("logoutHandler", w, r)
+	defer txn.End()
+	session := getSession(w, r, txn)
 	session.Options = &sessions.Options{MaxAge: -1}
 	session.Save(r, w)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
 func registerHandler(w http.ResponseWriter, r *http.Request) {
-	if err := setName(w, r); err != nil {
+	txn := app.StartTransaction("registerHandler", w, r)
+	defer txn.End()
+	if err := setName(w, r, txn); err != nil {
 		forbidden(w)
 		return
 	}
@@ -233,46 +296,64 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func registerPostHandler(w http.ResponseWriter, r *http.Request) {
+	txn := app.StartTransaction("registerPostHandler", w, r)
+	defer txn.End()
 	name := r.FormValue("name")
 	pw := r.FormValue("password")
 	if name == "" || pw == "" {
 		badRequest(w)
 		return
 	}
-	userID := register(name, pw)
-	session := getSession(w, r)
+	userID := register(name, pw, txn)
+	session := getSession(w, r, txn)
 	session.Values["user_id"] = userID
 	session.Save(r, w)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
-func register(user string, pass string) int64 {
+func register(user string, pass string, txn newrelic.Transaction) int64 {
 	salt, err := strrand.RandomString(`....................`)
 	panicIf(err)
+	s := newrelic.DatastoreSegment{
+		StartTime: txn.StartSegmentNow(),
+		Product: newrelic.DatastoreMySQL,
+		Collection: "user",
+		Operation: "INSERT",
+	}
 	res, err := db.Exec(`INSERT INTO user (name, salt, password, created_at) VALUES (?, ?, ?, NOW())`,
 		user, salt, fmt.Sprintf("%x", sha1.Sum([]byte(salt+pass))))
+	s.End()
 	panicIf(err)
 	lastInsertID, _ := res.LastInsertId()
 	return lastInsertID
 }
 
 func keywordByKeywordHandler(w http.ResponseWriter, r *http.Request) {
-	if err := setName(w, r); err != nil {
+	txn := app.StartTransaction("keywordByKeywordHandler", w, r)
+	defer txn.End()
+	if err := setName(w, r, txn); err != nil {
 		forbidden(w)
 		return
 	}
 
 	keyword, err := url.PathUnescape(mux.Vars(r)["keyword"])
 	panicIf(err)
+	s := newrelic.DatastoreSegment{
+		StartTime: txn.StartSegmentNow(),
+		Product: newrelic.DatastoreMySQL,
+		Collection: "entry",
+		Operation: "SELECT",
+	}
 	row := db.QueryRow(`SELECT * FROM entry WHERE keyword = ?`, keyword)
 	e := Entry{}
 	err = row.Scan(&e.ID, &e.AuthorID, &e.Keyword, &e.Description, &e.UpdatedAt, &e.CreatedAt)
+	s.End()
 	if err == sql.ErrNoRows {
 		notFound(w)
 		return
 	}
-	e.Html = htmlify(w, r, e.Description)
-	e.Stars = loadStars(e.Keyword)
+	e.Html = htmlify(w, r, e.Description, txn)
+	e.Stars = loadStars(e.Keyword, txn)
 
 	re.HTML(w, http.StatusOK, "keyword", struct {
 		Context context.Context
@@ -283,11 +364,13 @@ func keywordByKeywordHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func keywordByKeywordDeleteHandler(w http.ResponseWriter, r *http.Request) {
-	if err := setName(w, r); err != nil {
+	txn := app.StartTransaction("keywordByKeywordDeleteHandler", w, r)
+	defer txn.End()
+	if err := setName(w, r, txn); err != nil {
 		forbidden(w)
 		return
 	}
-	if err := authenticate(w, r); err != nil {
+	if err := authenticate(w, r, txn); err != nil {
 		forbidden(w)
 		return
 	}
@@ -301,20 +384,34 @@ func keywordByKeywordDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		badRequest(w)
 		return
 	}
+	s := newrelic.DatastoreSegment{
+		StartTime: txn.StartSegmentNow(),
+		Product: newrelic.DatastoreMySQL,
+		Collection: "entry",
+		Operation: "SELECT",
+	}
 	row := db.QueryRow(`SELECT * FROM entry WHERE keyword = ?`, keyword)
 	e := Entry{}
 	err := row.Scan(&e.ID, &e.AuthorID, &e.Keyword, &e.Description, &e.UpdatedAt, &e.CreatedAt)
+	s.End()
 	if err == sql.ErrNoRows {
 		notFound(w)
 		return
 	}
+	s2 := newrelic.DatastoreSegment{
+		StartTime: txn.StartSegmentNow(),
+		Product: newrelic.DatastoreMySQL,
+		Collection: "entry",
+		Operation: "DELETE",
+	}
 	_, err = db.Exec(`DELETE FROM entry WHERE keyword = ?`, keyword)
+	s2.End()
 	panicIf(err)
 	keywords.Delete(keyword)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
-func htmlify(w http.ResponseWriter, r *http.Request, content string) string {
+func htmlify(w http.ResponseWriter, r *http.Request, content string, txn newrelic.Transaction) string {
 	if content == "" {
 		return ""
 	}
@@ -348,10 +445,14 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string) string {
 	return strings.Replace(content, "\n", "<br />\n", -1)
 }
 
-func loadStars(keyword string) []*Star {
+func loadStars(keyword string, txn newrelic.Transaction) []*Star {
 	v := url.Values{}
 	v.Set("keyword", keyword)
-	resp, err := http.Get(fmt.Sprintf("%s/stars", isutarEndpoint) + "?" + v.Encode())
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/stars", isutarEndpoint) + "?" + v.Encode(), nil)
+	panicIf(err)
+	s := newrelic.StartExternalSegment(txn, req)
+	resp, err := http.DefaultClient.Do(req)
+	s.End()
 	panicIf(err)
 	defer resp.Body.Close()
 
@@ -363,10 +464,15 @@ func loadStars(keyword string) []*Star {
 	return data.Result
 }
 
-func isSpamContents(content string) bool {
+func isSpamContents(content string, txn newrelic.Transaction) bool {
 	v := url.Values{}
 	v.Set("content", content)
-	resp, err := http.PostForm(isupamEndpoint, v)
+	req, err := http.NewRequest(http.MethodPost, isupamEndpoint, nil)
+	panicIf(err)
+	req.PostForm = v
+	s := newrelic.StartExternalSegment(txn, req)
+	resp, err := http.DefaultClient.Do(req)
+	s.End()
 	panicIf(err)
 	defer resp.Body.Close()
 
@@ -378,11 +484,11 @@ func isSpamContents(content string) bool {
 	return !data.Valid
 }
 
-func getContext(r *http.Request, key interface{}) interface{} {
+func getContext(r *http.Request, key interface{}, txn newrelic.Transaction) interface{} {
 	return r.Context().Value(key)
 }
 
-func setContext(r *http.Request, key, val interface{}) {
+func setContext(r *http.Request, key, val interface{}, txn newrelic.Transaction) {
 	if val == nil {
 		return
 	}
@@ -391,7 +497,7 @@ func setContext(r *http.Request, key, val interface{}) {
 	*r = *r2
 }
 
-func getSession(w http.ResponseWriter, r *http.Request) *sessions.Session {
+func getSession(w http.ResponseWriter, r *http.Request, txn newrelic.Transaction) *sessions.Session {
 	session, _ := store.Get(r, sessionName)
 	return session
 }
@@ -492,7 +598,7 @@ func main() {
 	}
 
 	cfg := newrelic.NewConfig("isuda", os.Getenv("NEW_RELIC_KEY"))
-	app, err := newrelic.NewApplication(cfg)
+	app, err = newrelic.NewApplication(cfg)
 	if err != nil {
 		log.Fatalf("Failed to connect to New Relic: %s.", err.Error())
 	}
@@ -500,23 +606,23 @@ func main() {
 	r := mux.NewRouter()
 	r.UseEncodedPath()
 	AttachProfiler(r)
-	r.HandleFunc("/", myHandler(app, "topHandler", topHandler))
-	r.HandleFunc("/initialize", myHandler(app, "initializeHandler", initializeHandler)).Methods("GET")
-	r.HandleFunc("/robots.txt", myHandler(app, "robotsHandler", robotsHandler))
-	r.HandleFunc("/keyword", myHandler(app, "keywordPostHandler", keywordPostHandler)).Methods("POST")
+	r.HandleFunc("/", myHandler(topHandler))
+	r.HandleFunc("/initialize", myHandler(initializeHandler)).Methods("GET")
+	r.HandleFunc("/robots.txt", myHandler(robotsHandler))
+	r.HandleFunc("/keyword", myHandler(keywordPostHandler)).Methods("POST")
 
 	l := r.PathPrefix("/login").Subrouter()
-	l.Methods("GET").HandlerFunc(myHandler(app, "loginHandler", loginHandler))
-	l.Methods("POST").HandlerFunc(myHandler(app, "loginPostHandler", loginPostHandler))
-	r.HandleFunc("/logout", myHandler(app, "logoutHandler", logoutHandler))
+	l.Methods("GET").HandlerFunc(myHandler(loginHandler))
+	l.Methods("POST").HandlerFunc(myHandler(loginPostHandler))
+	r.HandleFunc("/logout", myHandler(logoutHandler))
 
 	g := r.PathPrefix("/register").Subrouter()
-	g.Methods("GET").HandlerFunc(myHandler(app, "registerHandler", registerHandler))
-	g.Methods("POST").HandlerFunc(myHandler(app, "registerPostHandler", registerPostHandler))
+	g.Methods("GET").HandlerFunc(myHandler(registerHandler))
+	g.Methods("POST").HandlerFunc(myHandler(registerPostHandler))
 
 	k := r.PathPrefix("/keyword/{keyword}").Subrouter()
-	k.Methods("GET").HandlerFunc(myHandler(app, "keywordByKeywordHandler", keywordByKeywordHandler))
-	k.Methods("POST").HandlerFunc(myHandler(app, "keywordByKeywordDeleteHandler", keywordByKeywordDeleteHandler))
+	k.Methods("GET").HandlerFunc(myHandler(keywordByKeywordHandler))
+	k.Methods("POST").HandlerFunc(myHandler(keywordByKeywordDeleteHandler))
 
 	r.PathPrefix("/").Handler(http.FileServer(http.Dir("./public/")))
 	log.Fatal(http.ListenAndServe(":5000", r))
