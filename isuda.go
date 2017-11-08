@@ -447,8 +447,7 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string, txn newreli
 	}
 	content = html.EscapeString(tmp_content)
 	for kw, hash := range kw2sha {
-		u, err := r.URL.Parse(baseUrl.String()+"/keyword/" + pathURIEscape(kw))
-		panicIf(err)
+		u := baseUrl.String()+"/keyword/" + pathURIEscape(kw)
 		link := fmt.Sprintf("<a href=\"%s\">%s</a>", u, html.EscapeString(kw))
 		content = strings.Replace(content, hash, link, -1)
 	}
