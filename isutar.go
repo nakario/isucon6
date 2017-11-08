@@ -12,6 +12,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/mux"
 	"github.com/unrolled/render"
+	"github.com/newrelic/go-agent"
 )
 
 var (
@@ -105,13 +106,19 @@ func main() {
 	db.Exec("SET SESSION sql_mode='TRADITIONAL,NO_AUTO_VALUE_ON_ZERO,ONLY_FULL_GROUP_BY'")
 	db.Exec("SET NAMES utf8mb4")
 
+	cfg := newrelic.NewConfig("isutar", os.Getenv("NEW_RELIC_KEY"))
+	app, err := newrelic.NewApplication(cfg)
+	if err != nil {
+		log.Fatalf("Failed to connect to New Relic: %s.", err.Error())
+	}
+
 	re = render.New(render.Options{Directory: "dummy"})
 
 	r := mux.NewRouter()
-	r.HandleFunc("/initialize", myHandler(initializeHandler))
+	r.HandleFunc("/initialize", myHandler(app, "initializeHandler", initializeHandler))
 	s := r.PathPrefix("/stars").Subrouter()
-	s.Methods("GET").HandlerFunc(myHandler(starsHandler))
-	s.Methods("POST").HandlerFunc(myHandler(starsPostHandler))
+	s.Methods("GET").HandlerFunc(myHandler(app, "starsHandler", starsHandler))
+	s.Methods("POST").HandlerFunc(myHandler(app, "starsPostHandler", starsPostHandler))
 
 	log.Fatal(http.ListenAndServe(":5001", r))
 }
