@@ -444,6 +444,8 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string, txn newreli
 			return kw2sha[kw]
 		})
 		htmlCache[content + "/" + concat] = tmp_content
+	} else {
+		log.Println("CACHE HIT!!!")
 	}
 	content = html.EscapeString(tmp_content)
 	for kw, hash := range kw2sha {
