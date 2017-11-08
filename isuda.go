@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"net/http/pprof"
+	"sort"
 
 	"github.com/Songmu/strrand"
 	_ "github.com/go-sql-driver/mysql"
@@ -41,6 +42,7 @@ var (
 	store   *sessions.CookieStore
 
 	errInvalidUser = errors.New("Invalid User")
+	htmlCache = make(map[string]string)
 )
 
 func setName(w http.ResponseWriter, r *http.Request) error {
@@ -323,11 +325,22 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string) string {
 	rows.Close()
 
 	kw2sha := make(map[string]string)
+	keywords := make([]string, 0, 500)
 	for _, entry := range entries {
-		content = strings.Replace(content, entry.Keyword, func(kw string) string {
-			kw2sha[kw] = "isuda_" + fmt.Sprintf("%x", sha1.Sum([]byte(kw)))
-			return kw2sha[kw]
-		}(entry.Keyword), -1)
+		keywords = append(keywords, entry.Keyword)
+	}
+	sort.Strings(keywords)
+	concat := strings.Join(keywords, "/")
+	tmp_content, ok := htmlCache[content + "/" + concat]
+	if !ok {
+		for _, keyword := range keywords {
+			content = strings.Replace(content, keyword, func(kw string) string {
+				kw2sha[kw] = "isuda_" + fmt.Sprintf("%x", sha1.Sum([]byte(kw)))
+				return kw2sha[kw]
+			}(keyword), -1)
+		}
+	} else {
+		content = tmp_content
 	}
 	content = html.EscapeString(content)
 	for kw, hash := range kw2sha {
