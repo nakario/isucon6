@@ -225,7 +225,7 @@ func keywordPostHandler(w http.ResponseWriter, r *http.Request) {
 	`, userID, keyword, description, userID, keyword, description)
 	s.End()
 	panicIf(err)
-	time.Sleep(sleepTime)
+	keywords.Store(keyword, "isuda_" + fmt.Sprintf("%x", sha1.Sum([]byte(keyword))))
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
@@ -420,7 +420,9 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string, txn newreli
 	kw2sha := make(map[string]string)
 	keywords_slice := make([]string, 0, 500)
 	keywords.Range(func(key, value interface{}) bool {
-		keywords_slice = append(keywords_slice, key.(string))
+		key_s, _ := key.(string)
+		keywords_slice = append(keywords_slice, key_s)
+		kw2sha[key_s] = value.(string)
 		return true
 	})
 	sort.Strings(keywords_slice)
@@ -430,7 +432,6 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string, txn newreli
 		tmp_content = content
 		for _, keyword := range keywords_slice {
 			tmp_content = strings.Replace(tmp_content, keyword, func(kw string) string {
-				kw2sha[kw] = "isuda_" + fmt.Sprintf("%x", sha1.Sum([]byte(kw)))
 				return kw2sha[kw]
 			}(keyword), -1)
 		}
@@ -595,7 +596,7 @@ func main() {
 	}
 	rows.Close()
 	for _, entry := range entries {
-		keywords.Store(entry.Keyword, nil)
+		keywords.Store(entry.Keyword, "isuda_" + fmt.Sprintf("%x", sha1.Sum([]byte(entry.Keyword))))
 	}
 
 	cfg := newrelic.NewConfig("isuda", os.Getenv("NEW_RELIC_KEY"))
