@@ -27,6 +27,7 @@ import (
 	"github.com/newrelic/go-agent"
 	"golang.org/x/sync/syncmap"
 	"time"
+	"regexp"
 )
 
 const (
@@ -442,11 +443,10 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string, txn newreli
 	tmp_content, ok := htmlCache[content + "/" + concat]
 	if !ok {
 		tmp_content = content
-		for _, keyword := range keywords_slice {
-			tmp_content = strings.Replace(tmp_content, keyword, func(kw string) string {
-				return kw2sha[kw]
-			}(keyword), -1)
-		}
+		re := regexp.MustCompile("("+strings.Join(keywords_slice, "|")+")")
+		tmp_content = re.ReplaceAllStringFunc(content, func(kw string) string {
+			return kw2sha[kw]
+		})
 		htmlCache[content + "/" + concat] = tmp_content
 	}
 	content = html.EscapeString(tmp_content)
