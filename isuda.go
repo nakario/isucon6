@@ -25,6 +25,7 @@ import (
 	"github.com/gorilla/sessions"
 	"github.com/unrolled/render"
 	"github.com/newrelic/go-agent"
+	"golang.org/x/sync/syncmap"
 )
 
 const (
@@ -43,6 +44,7 @@ var (
 
 	errInvalidUser = errors.New("Invalid User")
 	htmlCache = make(map[string]string)
+	keywords = syncmap.Map{}
 )
 
 func setName(w http.ResponseWriter, r *http.Request) error {
@@ -304,6 +306,7 @@ func keywordByKeywordDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err = db.Exec(`DELETE FROM entry WHERE keyword = ?`, keyword)
 	panicIf(err)
+	keywords.Delete(keyword)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
@@ -311,30 +314,19 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string) string {
 	if content == "" {
 		return ""
 	}
-	rows, err := db.Query(`
-		SELECT * FROM entry ORDER BY CHARACTER_LENGTH(keyword) DESC
-	`)
-	panicIf(err)
-	entries := make([]*Entry, 0, 500)
-	for rows.Next() {
-		e := Entry{}
-		err := rows.Scan(&e.ID, &e.AuthorID, &e.Keyword, &e.Description, &e.UpdatedAt, &e.CreatedAt)
-		panicIf(err)
-		entries = append(entries, &e)
-	}
-	rows.Close()
 
 	kw2sha := make(map[string]string)
-	keywords := make([]string, 0, 500)
-	for _, entry := range entries {
-		keywords = append(keywords, entry.Keyword)
-	}
-	sort.Strings(keywords)
-	concat := strings.Join(keywords, "/")
+	keywords_slice := make([]string, 0, 500)
+	keywords.Range(func(key, value interface{}) bool {
+		keywords_slice = append(keywords_slice, key.(string))
+		return true
+	})
+	sort.Strings(keywords_slice)
+	concat := strings.Join(keywords_slice, "/")
 	tmp_content, ok := htmlCache[content + "/" + concat]
 	if !ok {
 		tmp_content = content
-		for _, keyword := range keywords {
+		for _, keyword := range keywords_slice {
 			tmp_content = strings.Replace(tmp_content, keyword, func(kw string) string {
 				kw2sha[kw] = "isuda_" + fmt.Sprintf("%x", sha1.Sum([]byte(kw)))
 				return kw2sha[kw]
@@ -478,6 +470,22 @@ func main() {
 			},
 		},
 	})
+
+	rows, err := db.Query(`
+		SELECT * FROM entry ORDER BY CHARACTER_LENGTH(keyword) DESC
+	`)
+	panicIf(err)
+	entries := make([]*Entry, 0, 500)
+	for rows.Next() {
+		e := Entry{}
+		err := rows.Scan(&e.ID, &e.AuthorID, &e.Keyword, &e.Description, &e.UpdatedAt, &e.CreatedAt)
+		panicIf(err)
+		entries = append(entries, &e)
+	}
+	rows.Close()
+	for _, entry := range entries {
+		keywords.Store(entry.Keyword, nil)
+	}
 
 	cfg := newrelic.NewConfig("isuda", os.Getenv("NEW_RELIC_KEY"))
 	app, err := newrelic.NewApplication(cfg)
