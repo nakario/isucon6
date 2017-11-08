@@ -26,11 +26,13 @@ import (
 	"github.com/unrolled/render"
 	"github.com/newrelic/go-agent"
 	"golang.org/x/sync/syncmap"
+	"time"
 )
 
 const (
 	sessionName   = "isuda_session"
 	sessionSecret = "tonymoris"
+	sleepTime = 2 * time.Second
 )
 
 var (
@@ -175,6 +177,7 @@ func keywordPostHandler(w http.ResponseWriter, r *http.Request) {
 		author_id = ?, keyword = ?, description = ?, updated_at = NOW()
 	`, userID, keyword, description, userID, keyword, description)
 	panicIf(err)
+	time.Sleep(sleepTime)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
