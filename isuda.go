@@ -333,16 +333,16 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string) string {
 	concat := strings.Join(keywords, "/")
 	tmp_content, ok := htmlCache[content + "/" + concat]
 	if !ok {
+		tmp_content = content
 		for _, keyword := range keywords {
-			content = strings.Replace(content, keyword, func(kw string) string {
+			tmp_content = strings.Replace(tmp_content, keyword, func(kw string) string {
 				kw2sha[kw] = "isuda_" + fmt.Sprintf("%x", sha1.Sum([]byte(kw)))
 				return kw2sha[kw]
 			}(keyword), -1)
 		}
-	} else {
-		content = tmp_content
+		htmlCache[content + "/" + concat] = tmp_content
 	}
-	content = html.EscapeString(content)
+	content = html.EscapeString(tmp_content)
 	for kw, hash := range kw2sha {
 		u, err := r.URL.Parse(baseUrl.String()+"/keyword/" + pathURIEscape(kw))
 		panicIf(err)
