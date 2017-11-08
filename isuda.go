@@ -190,7 +190,6 @@ func robotsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func keywordPostHandler(w http.ResponseWriter, r *http.Request) {
-	log.Printf("%#v\n", *r)
 	txn := app.StartTransaction("keywordPostHandler", w, r)
 	defer txn.End()
 	if err := setName(w, r, txn); err != nil {
@@ -203,7 +202,7 @@ func keywordPostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	keyword := r.FormValue("keyword")
-	log.Println("Recieved request INSERT", keyword)
+	log.Printf("Recieved request INSERT %s : %v\n", keyword, *r)
 	if keyword == "" {
 		badRequest(w)
 		return
@@ -211,6 +210,8 @@ func keywordPostHandler(w http.ResponseWriter, r *http.Request) {
 	userID := getContext(r, "user_id", txn).(int)
 	description := r.FormValue("description")
 
+	log.Println("description", string([]rune(description)[:20]), "... is spam?", isSpamContents(description, txn))
+	log.Println("keyword", keyword, " is spam?", isSpamContents(keyword, txn))
 	if isSpamContents(description, txn) || isSpamContents(keyword, txn) {
 		http.Error(w, "SPAM!", http.StatusBadRequest)
 		return
