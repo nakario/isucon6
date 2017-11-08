@@ -109,7 +109,6 @@ func initializeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func topHandler(w http.ResponseWriter, r *http.Request) {
-	time.Sleep(sleepTime)
 	txn := app.StartTransaction("topHandler", w, r)
 	defer txn.End()
 	if err := setName(w, r, txn); err != nil {
