@@ -649,7 +649,6 @@ func main() {
 	go sortedKeywords()
 
 	cfg := newrelic.NewConfig("isuda", os.Getenv("NEW_RELIC_KEY"))
-	cfg.Enabled = false
 	app, err = newrelic.NewApplication(cfg)
 	if err != nil {
 		log.Fatalf("Failed to connect to New Relic: %s.", err.Error())
@@ -677,5 +676,5 @@ func main() {
 	k.Methods("POST").HandlerFunc(myHandler(keywordByKeywordDeleteHandler))
 
 	r.PathPrefix("/").Handler(http.FileServer(http.Dir("./public/")))
-	log.Fatal(http.ListenAndServe(":5000", r))
+	log.Fatal(http.ListenAndServe(":80", r))
 }
