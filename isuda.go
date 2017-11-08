@@ -17,7 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	_ "net/http/pprof"
+	"net/http/pprof"
 
 	"github.com/Songmu/strrand"
 	_ "github.com/go-sql-driver/mysql"
@@ -391,6 +391,19 @@ func getSession(w http.ResponseWriter, r *http.Request) *sessions.Session {
 	return session
 }
 
+func AttachProfiler(router *mux.Router) {
+	router.HandleFunc("/debug/pprof/", pprof.Index)
+	router.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	router.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	router.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+
+	// Manually add support for paths linked to by index page at /debug/pprof/
+	router.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+	router.Handle("/debug/pprof/heap", pprof.Handler("heap"))
+	router.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
+	router.Handle("/debug/pprof/block", pprof.Handler("block"))
+}
+
 func main() {
 	host := os.Getenv("ISUDA_DB_HOST")
 	if host == "" {
@@ -465,6 +478,7 @@ func main() {
 
 	r := mux.NewRouter()
 	r.UseEncodedPath()
+	AttachProfiler(r)
 	r.HandleFunc("/", myHandler(app, "topHandler", topHandler))
 	r.HandleFunc("/initialize", myHandler(app, "initializeHandler", initializeHandler)).Methods("GET")
 	r.HandleFunc("/robots.txt", myHandler(app, "robotsHandler", robotsHandler))

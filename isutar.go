@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
-	_ "net/http/pprof"
+	"net/http/pprof"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/mux"
@@ -74,6 +74,19 @@ func starsPostHandler(w http.ResponseWriter, r *http.Request) {
 	re.JSON(w, http.StatusOK, map[string]string{"result": "ok"})
 }
 
+func AttachProfiler(router *mux.Router) {
+	router.HandleFunc("/debug/pprof/", pprof.Index)
+	router.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	router.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	router.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+
+	// Manually add support for paths linked to by index page at /debug/pprof/
+	router.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+	router.Handle("/debug/pprof/heap", pprof.Handler("heap"))
+	router.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
+	router.Handle("/debug/pprof/block", pprof.Handler("block"))
+}
+
 func main() {
 	host := os.Getenv("ISUTAR_DB_HOST")
 	if host == "" {
@@ -116,6 +129,7 @@ func main() {
 	re = render.New(render.Options{Directory: "dummy"})
 
 	r := mux.NewRouter()
+	AttachProfiler(r)
 	r.HandleFunc("/initialize", myHandler(app, "initializeHandler", initializeHandler))
 	s := r.PathPrefix("/stars").Subrouter()
 	s.Methods("GET").HandlerFunc(myHandler(app, "starsHandler", starsHandler))
