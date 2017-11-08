@@ -48,6 +48,9 @@ var (
 	errInvalidUser = errors.New("Invalid User")
 	htmlCache = make(map[string]string)
 	keywords = syncmap.Map{}
+	insert = make(chan string, 0)
+	del = make(chan string, 0)
+	get = make(chan []string, 0)
 )
 
 func setName(w http.ResponseWriter, r *http.Request, txn newrelic.Transaction) error {
@@ -227,6 +230,7 @@ func keywordPostHandler(w http.ResponseWriter, r *http.Request) {
 	s.End()
 	panicIf(err)
 	log.Println("INSERT INTO entry", keyword)
+	insert <- keyword
 	keywords.Store(keyword, "isuda_" + fmt.Sprintf("%x", sha1.Sum([]byte(keyword))))
 	http.Redirect(w, r, "/", http.StatusFound)
 }
@@ -412,6 +416,7 @@ func keywordByKeywordDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	s2.End()
 	panicIf(err)
 	log.Println("DELETE FROM entry", keyword)
+	del <- keyword
 	keywords.Delete(keyword)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
@@ -422,16 +427,11 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string, txn newreli
 	}
 
 	kw2sha := make(map[string]string)
-	keywords_slice := make([]string, 0, 500)
+	keywords_slice := <- get
 	keywords.Range(func(key, value interface{}) bool {
 		key_s, _ := key.(string)
-		keywords_slice = append(keywords_slice, key_s)
 		kw2sha[key_s] = value.(string)
 		return true
-	})
-	sort.Strings(keywords_slice)
-	sort.Slice(keywords_slice, func(i, j int) bool {
-		return len([]rune(keywords_slice[i])) > len([]rune(keywords_slice[j]))
 	})
 	concat := strings.Join(keywords_slice, "/")
 	tmp_content, ok := htmlCache[content + "/" + concat]
@@ -531,6 +531,40 @@ func AttachProfiler(router *mux.Router) {
 	router.Handle("/debug/pprof/block", pprof.Handler("block"))
 }
 
+func sortedKeywords() {
+	sorted := make([]string, 0, 500)
+	keywords.Range(func(key, value interface{}) bool {
+		key_s, _ := key.(string)
+		sorted = append(sorted, key_s)
+		return true
+	})
+	sort.Strings(sorted)
+	sort.Slice(sorted, func(i, j int) bool {
+		return len([]rune(sorted[i])) > len([]rune(sorted[j]))
+	})
+	for {
+		select {
+			case word := <- insert:
+				sorted = append(sorted, word)
+				sort.Strings(sorted)
+				sort.Slice(sorted, func(i, j int) bool {
+					return len([]rune(sorted[i])) > len([]rune(sorted[j]))
+				})
+			case word := <- del:
+				index := -1
+				for i, w := range sorted {
+					if w == word {
+						index = i
+					}
+				}
+				if index >= 0 {
+					sorted = append(sorted[:index], sorted[:index]...)
+				}
+			case get <- sorted:
+		}
+	}
+}
+
 func main() {
 	host := os.Getenv("ISUDA_DB_HOST")
 	if host == "" {
@@ -612,6 +646,7 @@ func main() {
 	for _, entry := range entries {
 		keywords.Store(entry.Keyword, "isuda_" + fmt.Sprintf("%x", sha1.Sum([]byte(entry.Keyword))))
 	}
+	go sortedKeywords()
 
 	cfg := newrelic.NewConfig("isuda", os.Getenv("NEW_RELIC_KEY"))
 	app, err = newrelic.NewApplication(cfg)
