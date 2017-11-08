@@ -433,7 +433,7 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string, txn newreli
 	})
 	sort.Strings(keywords_slice)
 	sort.Slice(keywords_slice, func(i, j int) bool {
-		return len(keywords_slice[i]) < len(keywords_slice[j])
+		return len([]rune(keywords_slice[i])) > len([]rune(keywords_slice[j]))
 	})
 	concat := strings.Join(keywords_slice, "/")
 	tmp_content, ok := htmlCache[content + "/" + concat]
