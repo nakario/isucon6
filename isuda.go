@@ -202,7 +202,7 @@ func keywordPostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	keyword := r.FormValue("keyword")
-	log.Printf("Recieved request INSERT %s : %v\n", keyword, *r)
+	log.Printf("Recieved request INSERT %s : %v\n", keyword, r.Header)
 	if keyword == "" {
 		badRequest(w)
 		return
