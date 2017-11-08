@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	_ "net/http/pprof"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/mux"

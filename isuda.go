@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	_ "net/http/pprof"
 
 	"github.com/Songmu/strrand"
 	_ "github.com/go-sql-driver/mysql"
