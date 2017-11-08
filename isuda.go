@@ -108,6 +108,7 @@ func initializeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func topHandler(w http.ResponseWriter, r *http.Request) {
+	time.Sleep(sleepTime)
 	txn := app.StartTransaction("topHandler", w, r)
 	defer txn.End()
 	if err := setName(w, r, txn); err != nil {
@@ -189,6 +190,7 @@ func robotsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func keywordPostHandler(w http.ResponseWriter, r *http.Request) {
+	log.Printf("%#v\n", *r)
 	txn := app.StartTransaction("keywordPostHandler", w, r)
 	defer txn.End()
 	if err := setName(w, r, txn); err != nil {
