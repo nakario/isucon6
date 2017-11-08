@@ -27,7 +27,6 @@ import (
 	"github.com/newrelic/go-agent"
 	"golang.org/x/sync/syncmap"
 	"time"
-	"regexp"
 )
 
 const (
@@ -441,9 +440,7 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string, txn newreli
 	concat := strings.Join(keywords_slice, "/")
 	tmp_content, ok := htmlCache[content + "/" + concat]
 	if !ok {
-		tmp_content = content
-		re := regexp.MustCompile("("+strings.Join(keywords_slice, "|")+")")
-		tmp_content = re.ReplaceAllStringFunc(content, func(kw string) string {
+		tmp_content = recursiveReplace(content, keywords_slice, func(kw string) string {
 			return kw2sha[kw]
 		})
 		htmlCache[content + "/" + concat] = tmp_content
@@ -456,6 +453,17 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string, txn newreli
 		content = strings.Replace(content, hash, link, -1)
 	}
 	return strings.Replace(content, "\n", "<br />\n", -1)
+}
+
+func recursiveReplace(source string, spliters []string, repl func(string)string) string {
+	if len(spliters) == 0 {
+		return source
+	}
+	parts := []string{}
+	for _, part := range strings.Split(source, spliters[0]){
+		parts = append(parts, recursiveReplace(part, spliters[1:], repl))
+	}
+	return strings.Join(parts, repl(spliters[0]))
 }
 
 func loadStars(keyword string, txn newrelic.Transaction) []*Star {
