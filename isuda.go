@@ -120,6 +120,7 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 	if p == "" {
 		p = "1"
 	}
+	log.Println("Received request /?page=", p)
 	page, _ := strconv.Atoi(p)
 
 	s := newrelic.DatastoreSegment{
@@ -200,6 +201,7 @@ func keywordPostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	keyword := r.FormValue("keyword")
+	log.Println("Recieved request INSERT", keyword)
 	if keyword == "" {
 		badRequest(w)
 		return
@@ -225,6 +227,7 @@ func keywordPostHandler(w http.ResponseWriter, r *http.Request) {
 	`, userID, keyword, description, userID, keyword, description)
 	s.End()
 	panicIf(err)
+	log.Println("INSERT INTO entry", keyword)
 	keywords.Store(keyword, "isuda_" + fmt.Sprintf("%x", sha1.Sum([]byte(keyword))))
 	http.Redirect(w, r, "/", http.StatusFound)
 }
@@ -324,6 +327,7 @@ func register(user string, pass string, txn newrelic.Transaction) int64 {
 		user, salt, fmt.Sprintf("%x", sha1.Sum([]byte(salt+pass))))
 	s.End()
 	panicIf(err)
+	log.Println("INSERT INTO user", user)
 	lastInsertID, _ := res.LastInsertId()
 	return lastInsertID
 }
@@ -377,6 +381,7 @@ func keywordByKeywordDeleteHandler(w http.ResponseWriter, r *http.Request) {
 
 	keyword, err := url.PathUnescape(mux.Vars(r)["keyword"])
 	panicIf(err)
+	log.Println("Recieved request DELETE", keyword)
 	if keyword == "" {
 		badRequest(w)
 		return
@@ -408,6 +413,7 @@ func keywordByKeywordDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	_, err = db.Exec(`DELETE FROM entry WHERE keyword = ?`, keyword)
 	s2.End()
 	panicIf(err)
+	log.Println("DELETE FROM entry", keyword)
 	keywords.Delete(keyword)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
