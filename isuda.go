@@ -649,6 +649,7 @@ func main() {
 	go sortedKeywords()
 
 	cfg := newrelic.NewConfig("isuda", os.Getenv("NEW_RELIC_KEY"))
+	cfg.Enabled = false
 	app, err = newrelic.NewApplication(cfg)
 	if err != nil {
 		log.Fatalf("Failed to connect to New Relic: %s.", err.Error())
