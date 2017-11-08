@@ -120,7 +120,6 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 	if p == "" {
 		p = "1"
 	}
-	log.Println("Received request /?page=", p)
 	page, _ := strconv.Atoi(p)
 
 	s := newrelic.DatastoreSegment{
@@ -201,7 +200,6 @@ func keywordPostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	keyword := r.FormValue("keyword")
-	log.Printf("Recieved request INSERT %s : %v\n", keyword, r.Header)
 	if keyword == "" {
 		badRequest(w)
 		return
@@ -209,9 +207,8 @@ func keywordPostHandler(w http.ResponseWriter, r *http.Request) {
 	userID := getContext(r, "user_id", txn).(int)
 	description := r.FormValue("description")
 
-	log.Println("description", string([]rune(description)[:20]), "... is spam?", isSpamContents(description, txn))
-	log.Println("keyword", keyword, " is spam?", isSpamContents(keyword, txn))
 	if isSpamContents(description, txn) || isSpamContents(keyword, txn) {
+		log.Println("SPAM! kyeword:", keyword)
 		http.Error(w, "SPAM!", http.StatusBadRequest)
 		return
 	}
@@ -383,7 +380,6 @@ func keywordByKeywordDeleteHandler(w http.ResponseWriter, r *http.Request) {
 
 	keyword, err := url.PathUnescape(mux.Vars(r)["keyword"])
 	panicIf(err)
-	log.Println("Recieved request DELETE", keyword)
 	if keyword == "" {
 		badRequest(w)
 		return
@@ -444,8 +440,6 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string, txn newreli
 			return kw2sha[kw]
 		})
 		htmlCache[content + "/" + concat] = tmp_content
-	} else {
-		log.Println("CACHE HIT!!!")
 	}
 	content = html.EscapeString(tmp_content)
 	for kw, hash := range kw2sha {
